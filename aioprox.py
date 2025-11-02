@@ -2,7 +2,18 @@ import asyncio
 import threading
 import time
 import aiohttp
+import logging
 from aiohttp_socks import ProxyConnector
+
+
+# --- Logging setup ---
+logger = logging.getLogger("aioprox")
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)  # default verbosity
 
 
 class AsyncLoopThread:
@@ -32,6 +43,7 @@ class Proxy:
         test_url="http://httpbin.org/get",
         latency=False,
         custom_source=None,
+        verbose=True,
     ):
         self.test_url = test_url
         self.proxy_type = proxy_type.lower()
@@ -41,6 +53,13 @@ class Proxy:
         self.custom_source = custom_source
         self._proxy_cache = None
         self.good_proxies = []
+        self.verbose = verbose
+
+        # Set logging verbosity
+        if verbose:
+            logger.setLevel(logging.INFO)
+        else:
+            logger.setLevel(logging.WARNING)
 
         self.sources = {
             "speedx": {
@@ -70,11 +89,11 @@ class Proxy:
 
         if self.custom_source:
             self.proxy_url = None
-            print(f"Using custom proxy source: {self.custom_source}")
+            logger.info(f"Using custom proxy source: {self.custom_source}")
         else:
             try:
                 self.proxy_url = self.sources[self.source][self.proxy_type]
-                print(f"Using built-in source {self.source.upper()} ({self.proxy_type})")
+                logger.info(f"Using built-in source {self.source.upper()} ({self.proxy_type})")
             except KeyError:
                 raise ValueError(
                     f"Unsupported combination or missing source: source='{self.source}', type='{self.proxy_type}'"
@@ -90,7 +109,7 @@ class Proxy:
             try:
                 if isinstance(self.custom_source, list):
                     proxy_list = [p.strip() for p in self.custom_source if p.strip()]
-                    print(f"Loaded {len(proxy_list)} proxies from custom list input.")
+                    logger.info(f"Loaded {len(proxy_list)} proxies from custom list input.")
                 elif isinstance(self.custom_source, str):
                     if self.custom_source.startswith(("http://", "https://")):
                         async with aiohttp.ClientSession() as session:
@@ -100,21 +119,21 @@ class Proxy:
                         with open(self.custom_source, "r") as f:
                             text = f.read()
                     proxy_list = [p.strip() for p in text.splitlines() if p.strip()]
-                    print(f"Loaded {len(proxy_list)} proxies from custom source.")
+                    logger.info(f"Loaded {len(proxy_list)} proxies from custom source.")
                 else:
-                    print("Unsupported custom source format. Expected list, URL, or file path.")
+                    logger.warning("Unsupported custom source format. Expected list, URL, or file path.")
             except Exception as e:
-                print(f"Failed to load custom proxy list: {e}")
+                logger.error(f"Failed to load custom proxy list: {e}")
         elif self.proxy_url:
-            print(f"Fetching proxies from {self.proxy_url} ...")
+            logger.info(f"Fetching proxies from {self.proxy_url} ...")
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.proxy_url, timeout=10) as resp:
                         text = await resp.text()
                 proxy_list = [p.strip() for p in text.splitlines() if p.strip()]
-                print(f"Loaded {len(proxy_list)} proxies from {self.source}")
+                logger.info(f"Loaded {len(proxy_list)} proxies from {self.source}")
             except Exception as e:
-                print(f"Failed to fetch proxy list: {e}")
+                logger.error(f"Failed to fetch proxy list: {e}")
 
         clean_list = []
         for item in proxy_list:
@@ -158,11 +177,10 @@ class Proxy:
 
         async def test_proxy(proxy):
             async with semaphore:
-                print(f"Testing proxy: {proxy}")
+                logger.info(f"Testing proxy: {proxy}")
                 if await self._is_live_async(proxy, self.test_url):
-                    print(f"Live proxy found: {proxy}")
+                    logger.info(f"Live proxy found: {proxy}")
                     return proxy
-                print(f"Dead proxy: {proxy}")
                 return None
 
         tasks = [test_proxy(p) for p in proxy_list]
@@ -171,7 +189,7 @@ class Proxy:
             if result:
                 return result
 
-        print("No live proxy found.")
+        logger.warning("No live proxy found.")
         return None
 
     async def _find_all_live_proxies_async(self):
@@ -184,21 +202,14 @@ class Proxy:
 
         async def test_proxy(proxy):
             async with semaphore:
-                print(f"Testing proxy: {proxy}")
                 result = await self._is_live_async(proxy, self.test_url, latency=self.latency)
                 if self.latency:
                     is_live, delay = result
                     if is_live:
-                        print(f"Live proxy: {proxy} ({delay*1000:.1f} ms)")
                         live.append({"proxy": proxy, "latency": delay})
-                    else:
-                        print(f"Dead proxy: {proxy}")
                 else:
                     if result:
-                        print(f"Live proxy: {proxy}")
                         live.append(proxy)
-                    else:
-                        print(f"Dead proxy: {proxy}")
 
         tasks = [test_proxy(p) for p in proxy_list]
         for fut in asyncio.as_completed(tasks):
@@ -208,7 +219,7 @@ class Proxy:
             live.sort(key=lambda x: x["latency"])
 
         self.good_proxies = live
-        print(f"Found {len(live)} live proxies.")
+        logger.info(f"Found {len(live)} live proxies.")
         return live
 
     def get_random_proxy(self):
@@ -216,14 +227,13 @@ class Proxy:
             results = _LOOP_THREAD.run(self._find_all_live_proxies_async())
             if results:
                 fastest = results[0]["proxy"]
-                print(f"Fastest proxy selected: {fastest} ({results[0]['latency']*1000:.1f} ms)")
+                logger.info(f"Fastest proxy selected: {fastest} ({results[0]['latency']*1000:.1f} ms)")
                 return fastest
             else:
-                print("No live proxies found.")
+                logger.warning("No live proxies found.")
                 return None
         else:
             return _LOOP_THREAD.run(self._find_first_live_proxy_async())
 
     def get_good_proxies(self):
         return _LOOP_THREAD.run(self._find_all_live_proxies_async())
-
