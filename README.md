@@ -31,7 +31,10 @@
 pip install aiohttp aiohttp_socks
 ```
 
-Then clone or download `aioprox.py` into your project.
+Then clone this repo or 
+```bash
+pip install aioprox
+```
 
 ---
 
