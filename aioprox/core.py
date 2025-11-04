@@ -4,8 +4,16 @@ import time
 import aiohttp
 from aiohttp_socks import ProxyConnector
 import logging
+"""
+TODO
+Add save to file flag -- done
+Add function to fetch live proxies and save to file every x ammount -- in progress
+Prehaps ability to fetch proxies from sources other than github 
+(Although technically we aren't bound by github ATM due to us just checking HTML in current state)
 
-# Suppress noisy asyncio warnings on Windows
+"""
+
+# Asyncio Throws a fit about unreliable proxies
 logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 
 
@@ -38,6 +46,7 @@ class Proxy:
         custom_source=None,
         debug=False,
         timeout=3,
+        filename = None
     ):
         self.test_urls = test_urls
         self.proxy_type = proxy_type.lower()
@@ -49,6 +58,7 @@ class Proxy:
         self.timeout = timeout
         self._proxy_cache = None
         self.good_proxies = []
+        self.filename = filename
 
         self.sources = {
             "speedx": {
@@ -113,11 +123,16 @@ class Proxy:
         self._proxy_cache = clean_list
         return clean_list
 
+    def save_proxy_file(self, proxies):
+        filename = self.filename
+        with open(filename, "w", encoding="utf-8") as file:
+                for proxy in proxies:
+                    # Handle latency = True 
+                    if isinstance(proxy, dict):
+                        file.write(proxy["proxy"] + "\n")
+                    else:
+                        file.write(proxy + "\n")
     async def _is_live_async(self, proxy_ip_port, test_urls, timeout=None, latency=False):
-        """
-        Test URLs sequentially. Stop at the first failure.
-        Returns True/False or (True/False, latency) if latency=True.
-        """
         timeout = timeout or self.timeout
         proxy_url = f"{self.proxy_type}://{proxy_ip_port}"
         timeout_obj = aiohttp.ClientTimeout(total=timeout)
@@ -220,6 +235,8 @@ class Proxy:
             live.sort(key=lambda x: x["latency"])
 
         self.good_proxies = live
+        if self.filename:
+            self.save_proxy_file(live)
         return live
 
     def get_random_proxy(self, test_urls=None):
@@ -234,31 +251,3 @@ class Proxy:
         return _LOOP_THREAD.run(self._find_all_live_proxies_async())
 
 
-""" Following code is for debug while 
-    i add to feature set
-    LEAVE ALONE
-if __name__ == "__main__":
-    proxy_tester = Proxy(
-        proxy_type="http",
-        source="proxifly",
-        test_urls=["http://httpbin.org/get", "https://www.bing.com"],
-        concurrency=100,
-        latency=True,
-        debug=True,
-        timeout=5
-    )
-
-    print("[INFO] Fetching and testing proxies... this may take a while.")
-    good_proxies = proxy_tester.get_good_proxies()
-
-    if not good_proxies:
-        print("[WARNING] No working proxies found.")
-    else:
-        print(f"[SUCCESS] Found {len(good_proxies)} working proxies.")
-        if isinstance(good_proxies[0], dict):
-            for p in good_proxies[:10]:
-                print(f"{p['proxy']} - {p['latency']:.2f}s")
-        else:
-            for p in good_proxies[:10]:
-                print(p)
-"""
