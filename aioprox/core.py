@@ -6,6 +6,7 @@ from aiohttp_socks import ProxyConnector
 import logging
 """
 TODO
+Add typehinting ASAP (before code becomes unmanagable)
 Add save to file flag -- done
 Add function to fetch live proxies and save to file every x ammount -- in progress
 Prehaps ability to fetch proxies from sources other than github 
